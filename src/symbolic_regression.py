@@ -45,10 +45,10 @@ def _fit_pysr(X, y):
         model_selection="best",
         progress=True,
         random_state=config.SEED,
+        # Hall of fame streams here incrementally, so an interrupted
+        # discovery still leaves its best-so-far equations on disk.
         output_directory=str(config.CHECKPOINT_DIR / "sr"),
-        outfile="hall_of_fame",
         tempdir=str(config.CHECKPOINT_DIR / "sr-tmp"),
-        verbosity=0,
     )
     regressor.fit(X, y)
     best = regressor.get_best()

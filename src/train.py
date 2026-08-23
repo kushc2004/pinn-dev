@@ -24,8 +24,14 @@ from torch.utils.data import DataLoader, TensorDataset
 from . import config, data as data_mod, model as model_mod, physics
 
 
-def _checkpoint_path(model_name: str, protocol: str) -> Path:
-    return config.CHECKPOINT_DIR / f"{model_name}_{protocol}_latest.pt"
+def _checkpoint_path(model_name: str, protocol: str, lam: float | None = None) -> Path:
+    suffix = "" if model_name == "baseline" else f"_lam{lam:g}"
+    return config.CHECKPOINT_DIR / f"{model_name}_{protocol}{suffix}_latest.pt"
+
+
+def _fragment_path(model_name: str, protocol: str, lam: float) -> Path:
+    name = f"{model_name}_{protocol}" if model_name == "baseline" else f"{model_name}_{protocol}_lam{lam:g}"
+    return config.RESULTS_DIR / f"metrics_{name}.json"
 
 
 def _metrics(y_true_raw: np.ndarray, y_pred_raw: np.ndarray) -> dict:
@@ -74,7 +80,7 @@ def train(
         standardise = (float(residuals.mean()), float(residuals.std()))
 
     start_epoch = 0
-    ckpt_path = _checkpoint_path(model_kind, protocol)
+    ckpt_path = _checkpoint_path(model_kind, protocol, lam)
     if resume and ckpt_path.is_file():
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         if ckpt.get("data_sha256") != data_mod.data_sha256():
@@ -120,7 +126,7 @@ def train(
         "n_test": int(len(x_test)),
         **metrics,
     }
-    fragment = config.RESULTS_DIR / f"metrics_{model_kind}_{protocol}.json"
+    fragment = _fragment_path(model_kind, protocol, lam)
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     fragment.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
@@ -141,3 +147,13 @@ def _save_checkpoint(path, net, optimizer, epoch, standardise, model_kind, proto
     tmp = path.with_suffix(".tmp")
     torch.save(payload, tmp)
     shutil.move(tmp, path)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", required=True, choices=("baseline", "pinn"))
+    parser.add_argument("--protocol", default="random", choices=("random", "envelope"))
+    parser.add_argument("--lambda", dest="lam", type=float, default=config.PINN_LAMBDA)
+    parser.add_argument("--resume", action="store_true")
+    args = parser.parse_args()
+    train(args.model, args.protocol, lam=args.lam, resume=args.resume)

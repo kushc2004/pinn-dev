@@ -35,11 +35,12 @@ def write_metrics_csv(rows: list[dict]) -> Path:
 
 def predict(model_kind: str, protocol: str) -> tuple[np.ndarray, np.ndarray]:
     """Load the trained checkpoint and return (raw truth, raw prediction)."""
+    from . import config as cfg
     from . import data as data_mod
 
     device = model_mod.pick_device()
     split = data_mod.make_split(protocol)
-    ckpt_path = train_mod._checkpoint_path(model_kind, protocol)
+    ckpt_path = train_mod._checkpoint_path(model_kind, protocol, cfg.PINN_LAMBDA)
     if not ckpt_path.is_file():
         raise FileNotFoundError(f"No checkpoint for {model_kind}/{protocol}: {ckpt_path}")
     net = model_mod.build_model().to(device)
@@ -127,12 +128,48 @@ def physics_fit_figure() -> Path | None:
     return out
 
 
+def law_rows() -> list[dict]:
+    """Score each candidate power law alone on both test sets (raw units).
+
+    The laws predict in standardized space by construction, so their outputs
+    are inverse-transformed like any model prediction.
+    """
+    from . import data as data_mod, physics
+
+    device = model_mod.pick_device()
+    equation = json.loads(config.EQUATION_PATH.read_text())
+    laws = {
+        "law_sr": physics.compile_tree(equation["tree"]),
+        "law_legacy": physics.legacy_physics_fn(),
+    }
+    rows = []
+    for protocol in ("random", "envelope"):
+        split = data_mod.make_split(protocol)
+        x = torch.from_numpy(split.x_test).to(device)
+        for name, fn in laws.items():
+            with torch.no_grad():
+                pred_raw = split.unscale_y(fn(x).cpu().numpy())
+            rows.append(
+                {
+                    "model": name,
+                    "protocol": protocol,
+                    "lambda": "",
+                    "n_train": "",
+                    "n_test": int(len(x)),
+                    **train_mod._metrics(split.y_test_raw, pred_raw),
+                }
+            )
+    return rows
+
+
 def main() -> None:
     rows = collect_fragments()
     if not rows:
         raise SystemExit("No metric fragments found; run training first")
+    if config.EQUATION_PATH.is_file():
+        rows += law_rows()
     write_metrics_csv(rows)
-    for path in (parity_figure(), extrapolation_figure(rows), physics_fit_figure()):
+    for path in (parity_figure(), extrapolation_figure([r for r in rows if r.get("model") in ("baseline", "pinn")]), physics_fit_figure()):
         if path:
             print(f"Wrote {path}")
 

@@ -49,15 +49,31 @@ def run(force: bool = False) -> None:
     if force or state.get("data_sha256") != data_mod.data_sha256():
         state = {"stages": {}}
 
-    from . import symbolic_regression, train, evaluate
+    # Imports are deferred per step: PySR/juliacall must load before torch
+    # (importing torch first risks a segfault in juliacall), and later stages
+    # only need torch.
+    def _sr():
+        from . import symbolic_regression
+
+        return symbolic_regression.discover()
+
+    def _train(model_kind, protocol):
+        from . import train
+
+        return train.train(model_kind, protocol)
+
+    def _evaluate():
+        from . import evaluate
+
+        return evaluate.main()
 
     steps = [
-        ("sr", lambda: symbolic_regression.discover()),
-        ("baseline_random", lambda: train.train("baseline", "random")),
-        ("pinn_random", lambda: train.train("pinn", "random")),
-        ("baseline_envelope", lambda: train.train("baseline", "envelope")),
-        ("pinn_envelope", lambda: train.train("pinn", "envelope")),
-        ("evaluate", lambda: evaluate.main()),
+        ("sr", _sr),
+        ("baseline_random", lambda: _train("baseline", "random")),
+        ("pinn_random", lambda: _train("pinn", "random")),
+        ("baseline_envelope", lambda: _train("baseline", "envelope")),
+        ("pinn_envelope", lambda: _train("pinn", "envelope")),
+        ("evaluate", _evaluate),
     ]
     for name, step in steps:
         if not force and _stage_complete(state, name):
