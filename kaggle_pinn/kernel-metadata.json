@@ -1,0 +1,16 @@
+{
+  "id": "kushchaudhari/pinn-chiller-pipeline",
+  "title": "PINN Chiller Pipeline",
+  "code_file": "pinn_pipeline.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaP100",
+  "dataset_sources": ["kushchaudhari/chiller3-pinn-data"],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
