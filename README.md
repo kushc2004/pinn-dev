@@ -93,7 +93,9 @@ results/equation_high_load.json
 
 The expression is best described as a **data-discovered symbolic surrogate
 with physically interpretable feature dependence**, not a first-principles
-thermodynamic law or conventional dimensional power law.
+thermodynamic law or conventional dimensional power law. PySR runs inside an
+isolated subprocess with a hard wall-clock timeout so a Julia backend stall
+cannot block a cloud experiment indefinitely.
 
 ## Neural experiment
 

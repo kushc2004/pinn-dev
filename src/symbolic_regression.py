@@ -11,6 +11,10 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
 import numpy as np
 
@@ -28,7 +32,7 @@ def _subsample(protocol: str, split_seed: int = config.SEED):
     return split, split.x_train[idx].astype(np.float64), split.y_train[idx].astype(np.float64)
 
 
-def _fit_pysr(X, y, protocol: str):
+def _fit_pysr_in_process(X, y, protocol: str):
     from pysr import PySRRegressor
 
     regressor = PySRRegressor(
@@ -53,6 +57,43 @@ def _fit_pysr(X, y, protocol: str):
     regressor.fit(X, y)
     best = regressor.get_best()
     return best.sympy_format, float(best.loss)
+
+
+def _fit_pysr(X, y, protocol: str):
+    """Run PySR in a killable subprocess so a Julia wedge cannot stall the pipeline."""
+    scratch_root = config.CHECKPOINT_DIR / "sr-subprocess" / protocol
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=scratch_root) as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_path = tmpdir / "input.npz"
+        output_path = tmpdir / "output.json"
+        np.savez_compressed(input_path, X=X, y=y)
+        command = [
+            sys.executable,
+            "-m",
+            "src.pysr_worker",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+            "--protocol",
+            protocol,
+        ]
+        print(
+            f"Launching PySR subprocess for {protocol} with "
+            f"{config.SR_SUBPROCESS_TIMEOUT_SECONDS}s hard timeout",
+            flush=True,
+        )
+        subprocess.run(
+            command,
+            cwd=config.ROOT,
+            check=True,
+            timeout=config.SR_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+        payload = json.loads(output_path.read_text())
+        import sympy
+
+        return sympy.sympify(payload["expression"]), float(payload["loss"])
 
 
 def _fit_gplearn(X, y):
@@ -197,6 +238,7 @@ def discover(protocol: str, force: bool = False) -> dict:
             "maxsize": config.SR_MAXSIZE,
             "parallelism": "multithreading",
             "timeout_in_seconds": config.SR_TIMEOUT_SECONDS,
+            "subprocess_timeout_in_seconds": config.SR_SUBPROCESS_TIMEOUT_SECONDS,
         },
         "train_discovery_r2": _r2(tree, X, y),
         "validation_r2": _r2(tree, split.x_val, split.y_val),

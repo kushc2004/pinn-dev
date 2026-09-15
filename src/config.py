@@ -11,8 +11,8 @@ CHECKPOINT_DIR = RESULTS_DIR / "checkpoints"
 FIGURES_DIR = RESULTS_DIR / "figures"
 STATE_PATH = RESULTS_DIR / "state.json"
 
-# Increment whenever an evaluation or search-semantic change should invalidate cached stages.
-PROTOCOL_VERSION = "clean-v3-bounded-parallel-pysr-20260915"
+# Increment whenever an evaluation, training, or search-semantic change should invalidate cached stages.
+PROTOCOL_VERSION = "clean-v4-modal-bounded-pysr-20260915"
 
 TARGET_COLUMN = "Motor KW"
 FEATURE_COLUMNS = [
@@ -27,7 +27,7 @@ FEATURE_COLUMNS = [
 
 SEED = 42
 EPOCHS = 100
-BATCH_SIZE = 32
+BATCH_SIZE = 256
 LEARNING_RATE = 1e-3
 HIDDEN_DIMS = (64, 32, 16)
 CHECKPOINT_EVERY = 10
@@ -57,6 +57,7 @@ SR_CYCLES_PER_ITERATION = 200
 SR_BATCH_SIZE = 512
 SR_MAXSIZE = 20
 SR_TIMEOUT_SECONDS = 900
+SR_SUBPROCESS_TIMEOUT_SECONDS = 420
 
 # Hierarchical bootstrap of paired absolute-error differences across seeds and
 # rows, used for the final test-set improvement confidence interval.
