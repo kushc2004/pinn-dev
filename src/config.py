@@ -51,7 +51,7 @@ FINAL_SEEDS = (42, 43, 44, 45, 46)
 
 # Symbolic regression is fit only on the main training split for each protocol.
 SR_SUBSAMPLE = 5000
-SR_NITERATIONS = 40
+SR_NITERATIONS = 20
 
 # Hierarchical bootstrap of paired absolute-error differences across seeds and
 # rows, used for the final test-set improvement confidence interval.
