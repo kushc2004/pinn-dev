@@ -11,8 +11,8 @@ CHECKPOINT_DIR = RESULTS_DIR / "checkpoints"
 FIGURES_DIR = RESULTS_DIR / "figures"
 STATE_PATH = RESULTS_DIR / "state.json"
 
-# Increment whenever an evaluation-semantic change should invalidate cached stages.
-PROTOCOL_VERSION = "clean-v2-train-sr-val-lambda-20260915"
+# Increment whenever an evaluation or search-semantic change should invalidate cached stages.
+PROTOCOL_VERSION = "clean-v3-bounded-parallel-pysr-20260915"
 
 TARGET_COLUMN = "Motor KW"
 FEATURE_COLUMNS = [
@@ -52,6 +52,11 @@ FINAL_SEEDS = (42, 43, 44, 45, 46)
 # Symbolic regression is fit only on the main training split for each protocol.
 SR_SUBSAMPLE = 5000
 SR_NITERATIONS = 20
+SR_POPULATIONS = 8
+SR_CYCLES_PER_ITERATION = 200
+SR_BATCH_SIZE = 512
+SR_MAXSIZE = 20
+SR_TIMEOUT_SECONDS = 900
 
 # Hierarchical bootstrap of paired absolute-error differences across seeds and
 # rows, used for the final test-set improvement confidence interval.

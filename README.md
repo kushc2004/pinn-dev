@@ -80,8 +80,11 @@ training marginal ranges.
 
 For each protocol separately, PySR receives a seeded 5,000-row subsample of
 that protocol's **training split only**, already transformed by the train-only
-scalers. It searches expressions over `+ - * /` and stores the chosen op-tree
-in:
+scalers. It searches expressions over `+ - * /` with 20 outer iterations,
+8 populations using PySR multithreading, 512-row mutation batches, and a
+15-minute hard timeout. Hall-of-fame candidates are still evaluated on the
+full 5,000-row discovery sample. The chosen op-tree and exact search settings
+are stored in:
 
 ```text
 results/equation_random.json
