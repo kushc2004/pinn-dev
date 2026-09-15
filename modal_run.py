@@ -85,13 +85,10 @@ def run_experiment() -> str:
         check=True,
     )
     subprocess.run([sys.executable, "-m", "src.run_all", "--force"], check=True)
-    subprocess.run(
-        [sys.executable, "scripts/publish_kaggle_artifacts.py", "--no-upload"],
-        check=True,
-    )
 
+    # Persist the expensive experiment outputs *before* any optional packaging.
+    # This ensures a packaging/upload bug can never discard a successful run.
     shutil.copytree("results", f"{REMOTE_OUTPUT}/results", dirs_exist_ok=True)
-    shutil.copy2("artifacts/kaggle/pinn_artifacts.tar.gz", f"{REMOTE_OUTPUT}/pinn_artifacts.tar.gz")
     summary = json.loads(Path("results/final_summary.json").read_text())
     run_metadata = {
         "elapsed_seconds": time.time() - started,
@@ -99,7 +96,28 @@ def run_experiment() -> str:
         "cuda_available": torch.cuda.is_available(),
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         "summary": summary,
+        "artifact_packaging": "pending",
     }
+    Path(f"{REMOTE_OUTPUT}/modal_run.json").write_text(json.dumps(run_metadata, indent=2) + "\n")
+    volume.commit()
+
+    # Package only after the results are safely committed. Invoke as a module so
+    # the repository root remains on sys.path and `from src...` imports resolve.
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "scripts.publish_kaggle_artifacts", "--no-upload"],
+            check=True,
+        )
+        shutil.copy2(
+            "artifacts/kaggle/pinn_artifacts.tar.gz",
+            f"{REMOTE_OUTPUT}/pinn_artifacts.tar.gz",
+        )
+        run_metadata["artifact_packaging"] = "complete"
+    except Exception as error:
+        print(f"WARNING: artifact packaging failed after results were safely committed: {error}", flush=True)
+        run_metadata["artifact_packaging"] = f"failed: {type(error).__name__}: {error}"
+
+    run_metadata["elapsed_seconds"] = time.time() - started
     Path(f"{REMOTE_OUTPUT}/modal_run.json").write_text(json.dumps(run_metadata, indent=2) + "\n")
     volume.commit()
     return json.dumps(run_metadata, indent=2)
