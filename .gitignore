@@ -4,5 +4,8 @@ __pycache__/
 *.pyc
 outputs/
 artifacts/
+results/checkpoints/
+results/validation/
+results/state.json
 .kaggle/
 REPORT.md

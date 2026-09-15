@@ -34,7 +34,8 @@ LEGACY_EXPRESSION = "(x5*x0 + (x0*0.548 - (x4 - (x2 + (x6*x4*-0.125)/x5)))) * ((
 
 def _safe_div(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     eps = 1e-6
-    return a / torch.where(b.abs() < eps, torch.full_like(b, eps), b)
+    signed_eps = torch.where(b < 0, torch.full_like(b, -eps), torch.full_like(b, eps))
+    return a / torch.where(b.abs() < eps, signed_eps, b)
 
 
 def _eval_node(node: dict, columns: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -77,14 +78,16 @@ def compile_tree(tree: dict) -> Callable[[torch.Tensor], torch.Tensor]:
     return fn
 
 
-def load_equation() -> dict:
-    with open(config.EQUATION_PATH) as handle:
+def load_equation(protocol: str) -> dict:
+    if protocol == "envelope":
+        protocol = "high_load"
+    with open(config.equation_path(protocol)) as handle:
         return json.load(handle)
 
 
-def physics_fn_from_equation() -> tuple[Callable[[torch.Tensor], torch.Tensor], str]:
+def physics_fn_from_equation(protocol: str) -> tuple[Callable[[torch.Tensor], torch.Tensor], str]:
     """Return (compiled physics function, human-readable expression)."""
-    equation = load_equation()
+    equation = load_equation(protocol)
     return compile_tree(equation["tree"]), equation["expression"]
 
 

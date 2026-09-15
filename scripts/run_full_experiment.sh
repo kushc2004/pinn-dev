@@ -1,5 +1,6 @@
 #!/bin/sh
-# Run the full experiment pipeline (SR discovery -> 4 trainings -> evaluate).
+# Run the clean protocol: train-only SR -> validation lambda sweep ->
+# multi-seed final models -> one-shot final test evaluation.
 # Pass --force to ignore completed-stage checkpoints.
 set -e
 cd "$(dirname "$0")/.."

@@ -1,4 +1,4 @@
-"""Shared configuration for the chiller PINN pipeline."""
+"""Shared configuration for the chiller physics-guided regression pipeline."""
 
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ DATA_PATH = ROOT / "data" / "cleaned_chiller-3.csv"
 RESULTS_DIR = ROOT / "results"
 CHECKPOINT_DIR = RESULTS_DIR / "checkpoints"
 FIGURES_DIR = RESULTS_DIR / "figures"
-EQUATION_PATH = RESULTS_DIR / "equation.json"
 STATE_PATH = RESULTS_DIR / "state.json"
+
+# Increment whenever an evaluation-semantic change should invalidate cached stages.
+PROTOCOL_VERSION = "clean-v2-train-sr-val-lambda-20260915"
 
 TARGET_COLUMN = "Motor KW"
 FEATURE_COLUMNS = [
@@ -24,20 +26,42 @@ FEATURE_COLUMNS = [
 ]
 
 SEED = 42
-TEST_FRACTION = 0.2
-VALIDATION_FRACTION = 0.2
 EPOCHS = 100
 BATCH_SIZE = 32
 LEARNING_RATE = 1e-3
 HIDDEN_DIMS = (64, 32, 16)
 CHECKPOINT_EVERY = 10
 
-# Weight on the physics residual term for the PINN runs.
-PINN_LAMBDA = 1.0
+# Random interpolation protocol: 20% test, then 20% of the remaining 80% for
+# validation -> 64/16/20 train/validation/test overall.
+RANDOM_TEST_FRACTION = 0.20
+RANDOM_VALIDATION_FRACTION_OF_REMAINDER = 0.20
 
-# Envelope protocol: train on samples below this quantile of Motor KW,
-# evaluate both models on the held-out high-load region.
-ENVELOPE_QUANTILE = 0.9
+# High-load target-tail protocol. These boundaries are computed from Motor KW
+# once, before any learned preprocessing. The final top decile is never used
+# for scaling, PySR discovery, lambda selection, or early model decisions.
+HIGH_LOAD_TRAIN_QUANTILE = 0.80
+HIGH_LOAD_VALIDATION_QUANTILE = 0.90
 
+# Physics-weight selection is validation-only. Test metrics are produced only
+# after this sweep has selected a frozen lambda.
+LAMBDA_CANDIDATES = (0.00, 0.02, 0.05, 0.10, 0.20, 0.50, 1.00)
+TUNING_SEEDS = (42, 43, 44)
+FINAL_SEEDS = (42, 43, 44, 45, 46)
+
+# Symbolic regression is fit only on the main training split for each protocol.
 SR_SUBSAMPLE = 5000
 SR_NITERATIONS = 40
+
+# Hierarchical bootstrap of paired absolute-error differences across seeds and
+# rows, used for the final test-set improvement confidence interval.
+BOOTSTRAP_SAMPLES = 5000
+BOOTSTRAP_SEED = 20260915
+
+
+def equation_path(protocol: str) -> Path:
+    return RESULTS_DIR / f"equation_{protocol}.json"
+
+
+def selection_path(protocol: str) -> Path:
+    return RESULTS_DIR / f"lambda_selection_{protocol}.json"

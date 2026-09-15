@@ -40,6 +40,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", help="Path to pinn_artifacts.tar.gz (auto-discovered by default)")
     parser.add_argument("--dest", type=Path, default=ROOT, help="Repo root to restore into")
+    parser.add_argument(
+        "--allow-unverified",
+        action="store_true",
+        help="Allow legacy archives without an embedded checksum manifest.",
+    )
     arguments = parser.parse_args()
 
     archive_path = _find_archive(arguments.archive)
@@ -48,7 +53,12 @@ def main() -> None:
         members = {m.name: m for m in archive.getmembers() if m.isfile()}
         raw_manifest = members.get("artifact_manifest.json")
         if raw_manifest is None:
-            print("Archive carries no embedded manifest; restoring without verification")
+            if not arguments.allow_unverified:
+                raise RuntimeError(
+                    "Archive carries no embedded manifest; refusing unverified restore. "
+                    "Pass --allow-unverified only for a trusted legacy archive."
+                )
+            print("Archive carries no embedded manifest; restoring because --allow-unverified was set")
             archive.extractall(arguments.dest, filter="data")
             return
 
@@ -63,6 +73,28 @@ def main() -> None:
             if _sha256_bytes(data) != record["sha256"]:
                 raise RuntimeError(f"Checksum mismatch for {relative}; refusing to restore")
             payloads[relative] = data
+
+        # Reject an otherwise valid archive from an older experiment protocol
+        # or different source dataset before it can write stale results into
+        # the working tree. The Kaggle notebook stages the current CSV first.
+        state_bytes = payloads.get("results/state.json")
+        if state_bytes is not None:
+            state = json.loads(state_bytes)
+            from src import config
+            from src.data import data_sha256
+
+            if state.get("protocol_version") != config.PROTOCOL_VERSION:
+                print(
+                    "Artifact cache uses a different protocol version; "
+                    "ignoring it and running from scratch"
+                )
+                return
+            if state.get("data_sha256") != data_sha256():
+                print(
+                    "Artifact cache was built from a different dataset; "
+                    "ignoring it and running from scratch"
+                )
+                return
 
         for relative, data in payloads.items():
             target = arguments.dest / relative

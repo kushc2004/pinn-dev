@@ -15,11 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET = "kushchaudhari/pinn-chiller-artifacts"
 INCLUDE = ("results",)
 EXPECTED_STAGES = (
-    "sr",
-    "baseline_random",
-    "pinn_random",
-    "baseline_envelope",
-    "pinn_envelope",
+    "sr_random",
+    "sr_high_load",
+    "tune_random",
+    "tune_high_load",
+    "final_random",
+    "final_high_load",
     "evaluate",
 )
 
@@ -122,7 +123,8 @@ def main() -> None:
             raise RuntimeError(f"Archive is missing expected files: {missing[:3]}")
 
     os.replace(staging, published)
-    print(f"packaged {published / archive_path.name} ({archive_path.stat().st_size} bytes, {len(files)} files)")
+    published_archive = published / archive_path.name
+    print(f"packaged {published_archive} ({published_archive.stat().st_size} bytes, {len(files)} files)")
     if arguments.no_upload:
         return
     if arguments.create:

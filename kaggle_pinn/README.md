@@ -1,7 +1,8 @@
 # Kaggle execution track
 
-Runs the full experiment pipeline on a Tesla P100 kernel, mirroring the
-workflow used by the RankLab project.
+Runs the clean experiment pipeline on a Tesla P100: train-only symbolic
+discovery, validation-only physics-weight selection, multi-seed final models,
+and one-shot final test evaluation.
 
 ## One-time setup
 
@@ -44,4 +45,6 @@ Then add `"kushchaudhari/pinn-chiller-artifacts"` to `dataset_sources` in
 `kernel-metadata.json` and re-push: the next run attaches the cache,
 validates its manifest against the dataset fingerprint, restores
 `results/`, and `src/run_all.py` executes only the stages that are not yet
-complete.
+complete. Cached state is accepted only when both the dataset fingerprint and
+the current `PROTOCOL_VERSION` match, so pre-clean checkpoints cannot be
+silently reused.

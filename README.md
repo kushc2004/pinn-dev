@@ -1,161 +1,187 @@
-# Physics-Informed Neural Networks for Chiller Power Modeling
+# Physics-Guided Chiller Power Prediction
 
-Discover a chiller's governing power law from data with **symbolic regression**,
-then train a neural network whose loss enforces that law — so predictions stay
-physically consistent even where training data is sparse or absent.
+Leakage-safe regression benchmark for industrial chiller power using a
+train-only symbolic surrogate as a neural-network regularizer.
 
-This work began as a Siemens exploration of physics-informed modeling for HVAC
-chiller telemetry (published here with permission; see [Provenance](#provenance)).
-The original TensorFlow prototype is preserved untouched in
-[`legacy/`](legacy/); this repository is a from-scratch PyTorch rebuild that is
-fully reproducible end to end.
+The project predicts **Motor KW** from seven operating channels in 18,987
+snapshots of one water-cooled chiller. It began as a Siemens exploration; the
+original TensorFlow prototype remains under `legacy/`, while the active code is
+a reproducible PyTorch/PySR rebuild.
 
-## Method
+## What changed in the clean protocol
 
+The earlier experimental version had two evaluation problems: symbolic
+regression sampled rows from the complete dataset, and the physics weight
+`lambda` was compared directly on the high-load test set. Those results are
+preserved in git history but are **not used as current evidence**.
+
+The clean protocol enforces:
+
+1. **Split before every learned statistic.**
+2. **Train-only scaling.** The same feature/target scalers are used by PySR and
+   the neural models.
+3. **Train-only symbolic regression.** PySR never sees validation/test rows or
+   targets.
+4. **Validation-only lambda selection.** `lambda` is selected over
+   `{0, .02, .05, .10, .20, .50, 1.0}` using mean validation MAE across three
+   seeds. Allowing `lambda=0` prevents the experiment from forcing a physics
+   prior when validation does not support it.
+5. **Final test touched only after model selection.** The frozen baseline and
+   selected physics-guided model are evaluated across five seeds.
+6. **Paired uncertainty.** A hierarchical bootstrap reports a 95% confidence
+   interval for the paired MAE improvement.
+7. **Practical tabular references.** Fixed Ridge and histogram-gradient-
+   boosting baselines are reported alongside the controlled MLP comparison.
+
+## Data and target
+
+Inputs:
+
+- Evaporator inlet water temperature
+- Evaporator outlet water temperature
+- Evaporator flow rate
+- Condenser refrigerant pressure
+- Condenser inlet water temperature
+- Condenser outlet water temperature
+- Condenser flow rate
+
+Target: **Motor KW**.
+
+## Evaluation protocols
+
+### 1. Random interpolation
+
+Deterministic **64/16/20** train/validation/test split. This measures ordinary
+interpolation under the empirical sample distribution; it is not presented as
+future-time generalization.
+
+### 2. High-load target-tail stress test
+
+`Motor KW` quantiles define three non-overlapping partitions:
+
+- bottom 80% -> train,
+- 80th--90th percentile -> validation,
+- top 10% -> final test.
+
+On the current dataset this is approximately:
+
+| Partition | Rows | Motor KW range |
+|---|---:|---:|
+| Train | 15,250 | 139.1--249.1 |
+| Validation | 1,882 | 249.2--252.2 |
+| Final test | 1,855 | 252.3--260.8 |
+
+This is intentionally described as **high-load target-tail generalization**.
+It is not called full physical operating-envelope extrapolation: the evaluator
+also records, feature by feature, how much of the final test lies outside the
+training marginal ranges.
+
+## Symbolic surrogate
+
+For each protocol separately, PySR receives a seeded 5,000-row subsample of
+that protocol's **training split only**, already transformed by the train-only
+scalers. It searches expressions over `+ - * /` and stores the chosen op-tree
+in:
+
+```text
+results/equation_random.json
+results/equation_high_load.json
 ```
-                 ┌────────────────────────┐
-  chiller        │  symbolic regression   │   closed-form power law
-  telemetry ───▶ │  (PySR genetic search) │ ──────────────┐   f(x; θ)
-  (7 sensors)    └────────────────────────┘               │
-       │                                                  ▼
-       │            ┌──────────────────────────────────────────┐
-       └──────────▶ │      neural network  MLP(7→64→32→16→1)    │──▶ Motor KW
-                    │  L = MSE(y, ŷ) + λ·MSE(f(x_batch), ŷ)     │
-                    └──────────────────────────────────────────┘
+
+The expression is best described as a **data-discovered symbolic surrogate
+with physically interpretable feature dependence**, not a first-principles
+thermodynamic law or conventional dimensional power law.
+
+## Neural experiment
+
+Both controlled neural models use exactly the same MLP:
+
+```text
+7 -> 64 -> 32 -> 16 -> 1
 ```
 
-1. **Discovery** ([`src/symbolic_regression.py`](src/symbolic_regression.py)) — PySR
-   evolves closed-form expressions against ~5k standardized samples until one
-   tracks compressor power accurately at low complexity. The winner is stored in
-   [`results/equation.json`](results/equation.json).
-2. **Constrained training** ([`src/train.py`](src/train.py)) — the discovered law
-   is compiled into a torch op-tree ([`src/physics.py`](src/physics.py)) and added
-   to the loss *per batch*, evaluated on each batch's own features (the legacy TF
-   scripts computed it once over the whole training set, which constrains nothing
-   per-sample). The residual is standardized with training-set statistics so λ is
-   comparable to the MSE weight.
-3. **Evaluation** ([`src/evaluate.py`](src/evaluate.py)) — two protocols:
-   - `random`: standard iid 80/20 split;
-   - `envelope`: both models train only on samples below the 90th percentile of
-     motor load and are scored on the held-out high-load region they never saw.
-     The legacy "extrapolation" scripts trained on 100% of the data before
-     testing its own low tail — this protocol replaces that with genuine
-     out-of-envelope extrapolation.
+The baseline minimizes data MSE. The physics-guided model minimizes:
 
-Baseline and PINN share architecture, seed-42 initialization, optimizer, epochs,
-and splits; the only difference is the physics term.
+```text
+MSE(y, y_hat) + lambda * MSE(f_SR(x), y_hat)
+```
 
-## Results
+Because PySR and the network now share the same train-fitted coordinates,
+`f_SR(x)` already lives in standardized target space; no second ad-hoc
+standardization of the symbolic output is applied.
 
-Chiller-3 water-cooled dataset (18,987 rows), fully regenerated by this repo.
-PySR recovers the power law at **R² 0.90** against the standardized target;
-the legacy hand-written law scores **R² −121**, so the rediscovery step is not
-decorative — it replaces a law that was quietly wrong.
-
-| Protocol | Model | R² | MAE (KW) | RMSE | MAPE |
-|---|---|---|---|---|---|
-| random | Baseline | 0.977 | 1.93 | 3.39 | 0.88% |
-| random | PINN (λ=0.05) | 0.977 | 1.94 | 3.39 | 0.88% |
-| random | PINN (λ=0.2) | 0.974 | 2.17 | 3.57 | 0.98% |
-| envelope | Baseline | −9.98 | 4.47 | 5.81 | 1.75% |
-| envelope | PINN (λ=0.2) | **−7.80** | **3.69** | **5.20** | **1.45%** |
-| envelope | SR law alone | −17.7 | 6.11 | 7.59 | 2.40% |
-
-Full table including every λ ∈ {0.05, 0.2, 1.0} and the archived legacy law:
-[`results/metrics.csv`](results/metrics.csv).
-
-### Findings
-
-1. **A light physics constraint is free.** At λ=0.05 the PINN matches the
-   unconstrained baseline to three decimals in-distribution while satisfying
-   the discovered law.
-2. **A moderate constraint buys extrapolation.** On the held-out high-load
-   region — which no model saw in training — λ=0.2 reduces MAE by **17%**
-   and RMSE by **11%** versus the baseline.
-3. **The hybrid beats both parents out-of-domain.** The SR law alone
-   collapses on the envelope (its own validity domain ends with the data),
-   and so does the naive baseline; the blend inherits the law's structure
-   while the network re-anchors it. Overweighting (λ=1.0) keeps most of the
-   extrapolation gain but starts taxing in-distribution fit.
-4. Negative R² across the board on the envelope is expected and reported
-   as-is: extrapolating ~10 KW beyond the training range is genuinely hard,
-   and the point is the *relative* gap, not absolute accuracy.
-
-Archived Climatix circuit-1 runs from the legacy TF codebase (raw data not
-redistributable; metrics recomputed from the archived prediction files in
-[`legacy/climatix/`](legacy/climatix/)): baseline R² 0.900 / MAPE 2.11%, PINN
-R² 0.883 / MAPE 2.10% — the same pattern of a small honesty tax for the
-constraint, which motivated building this evaluation properly.
-
-Figures live in [`results/figures/`](results/figures/): parity plots per
-protocol (`parity.png`), held-out envelope comparison
-(`extrapolation_comparison.png`), and candidate power laws vs the held-out
-region (`physics_law_vs_envelope.png`).
-
-## Reproduce
+## Reproduce locally
 
 ```sh
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt          # torch, scikit-learn, pysr, ...
-sh scripts/run_full_experiment.sh        # SR → 4 trainings → evaluation
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+python -m unittest discover -s tests -v
+sh scripts/run_full_experiment.sh
 ```
 
-Every stage checkpoints into `results/checkpoints/` and records completion in
-`results/state.json`; rerunning skips completed stages, `--force` re-runs all.
-Individual pieces:
+The pipeline stages are:
 
-```sh
-python -m src.symbolic_regression --force    # rediscover only
-python -m src.train --model pinn --protocol envelope --lambda 0.2 --resume
-python -m src.evaluate                       # tables + figures only
+```text
+sr_random
+sr_high_load
+tune_random
+tune_high_load
+final_random
+final_high_load
+evaluate
 ```
 
-The headline table sweeps the constraint weight:
+Every stage is cached in `results/state.json` with both the dataset SHA-256 and
+`PROTOCOL_VERSION`. A dataset or evaluation-protocol change invalidates stale
+state automatically.
 
-```sh
-for lam in 1.0 0.2 0.05; do
-  python -m src.train --model pinn --protocol random   --lambda $lam
-  python -m src.train --model pinn --protocol envelope --lambda $lam
-done && python -m src.evaluate
+## Outputs
+
+After a complete run:
+
+```text
+results/
+  equation_random.json
+  equation_high_load.json
+  lambda_selection_random.json
+  lambda_selection_high_load.json
+  final_summary.json
+  metrics.csv
+  validation/
+  checkpoints/
+  figures/
+    parity_clean_protocol.png
+    lambda_validation_sweep.png
 ```
 
-## Run on Kaggle (P100)
+`final_summary.json` is the source of truth for any CV metric. Do not reuse the
+pre-clean 17.5% number unless the clean run independently reproduces it.
 
-The same pipeline runs as a Kaggle notebook on a Tesla P100, following the
-artifact-cache workflow described in [`kaggle_pinn/README.md`](kaggle_pinn/README.md):
+## Kaggle P100 run
+
+The notebook in `kaggle_pinn/` clones the current GitHub `main`, verifies the
+code/tests, stages the private Chiller-3 dataset, restores only compatible
+artifacts, runs the full clean protocol, and exports `pinn_artifacts.tar.gz`.
 
 ```sh
 kaggle kernels push -p kaggle_pinn
-python3 scripts/watch_kaggle_kernel.py --slug kushchaudhari/pinn-chiller-pipeline \
-    --output outputs/logs/kaggle_pinn.log
+python3 scripts/watch_kaggle_kernel.py \
+  --slug kushchaudhari/pinn-chiller-pipeline \
+  --output outputs/logs/kaggle_pinn.log
 ```
 
-Checkpoints survive interruptions: completed stages publish to a private
-Kaggle artifact dataset (`scripts/publish_kaggle_artifacts.py`) with sha256
-manifests; the next run attaches it, verifies checksums
-(`scripts/restore_kaggle_artifacts.py`), and resumes from `results/state.json`.
+## Claim boundary
 
-## Repository layout
-
-```
-data/cleaned_chiller-3.csv   chiller telemetry (7 sensor features → Motor KW)
-src/
-  config.py                  features, seeds, λ, split parameters
-  data.py                    loading + random/envelope protocols
-  symbolic_regression.py     PySR discovery (gplearn fallback) → equation.json
-  physics.py                 op-tree compiler for the discovered law (+ legacy law)
-  model.py                   shared MLP
-  train.py                   baseline/PINN training, checkpoints, resume
-  evaluate.py                metric aggregation + figures
-  run_all.py                 stage machine driven by results/state.json
-scripts/                     full-experiment runner, Kaggle publish/restore/watch
-kaggle_pinn/                 P100 kernel metadata + thin driver notebook
-legacy/                      original TensorFlow prototype, preserved verbatim
-```
+This repository contains one chiller from one site. It is suitable for a
+controlled study of symbolic regularization and high-load target-tail
+generalization. It does **not** establish cross-chiller, cross-site, or
+production-control performance.
 
 ## Provenance
 
-Developed from an exploration carried out with Siemens resources (Climatix /
-water-cooled chiller telemetry). The dataset and derived artifacts are used
-here with permission; raw Climatix circuit data was not retained and is not
-redistributed.
+Developed from an exploration carried out with Siemens resources
+(Climatix/water-cooled chiller telemetry). The cleared Chiller-3 dataset and
+derived artifacts are used here with permission; raw Climatix circuit data is
+not redistributed.
