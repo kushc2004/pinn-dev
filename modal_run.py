@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent
 APP_NAME = "pinn-chiller-clean"
 VOLUME_NAME = "pinn-chiller-results"
 REMOTE_REPO = "/root/pinn-dev"
-REMOTE_OUTPUT = "/outputs/fast_feature_aug_latest"
+REMOTE_OUTPUT = "/outputs/fast_cv_latest"
 
 app = modal.App(APP_NAME)
 volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
@@ -76,7 +76,7 @@ def run_experiment() -> str:
     if torch.cuda.is_available():
         print("gpu:", torch.cuda.get_device_name(0), flush=True)
     print("cpu_count:", os.cpu_count(), flush=True)
-    print("experiment: fast high-load physics-feature augmentation", flush=True)
+    print("experiment: five-fold physics-feature CV", flush=True)
 
     started = time.time()
     subprocess.run([sys.executable, "-m", "compileall", "-q", "src", "scripts"], check=True)
@@ -84,12 +84,12 @@ def run_experiment() -> str:
         [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
         check=True,
     )
-    subprocess.run([sys.executable, "-m", "src.run_fast_feature_aug"], check=True)
+    subprocess.run([sys.executable, "-m", "src.run_fast_cv"], check=True)
 
     # Persist the expensive experiment outputs *before* any optional packaging.
     # This ensures a packaging/upload bug can never discard a successful run.
     shutil.copytree("results", f"{REMOTE_OUTPUT}/results", dirs_exist_ok=True)
-    summary = json.loads(Path("results/fast_feature_aug_summary.json").read_text())
+    summary = json.loads(Path("results/five_fold_physics_feature_cv.json").read_text())
     run_metadata = {
         "elapsed_seconds": time.time() - started,
         "torch_version": torch.__version__,
@@ -105,7 +105,7 @@ def run_experiment() -> str:
     # expects the full random+high-load pipeline and is not applicable here.
     try:
         import tarfile
-        archive_path = f"{REMOTE_OUTPUT}/fast_feature_aug_results.tar.gz"
+        archive_path = f"{REMOTE_OUTPUT}/fast_cv_results.tar.gz"
         with tarfile.open(archive_path, "w:gz", compresslevel=1) as archive:
             archive.add("results", arcname="results")
         run_metadata["artifact_packaging"] = "complete"
