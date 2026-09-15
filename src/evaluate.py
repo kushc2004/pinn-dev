@@ -46,8 +46,7 @@ def _predict_test(model_kind: str, protocol: str, seed: int, lam: float | None =
 
 def _law_test_row(protocol: str) -> dict:
     split = data_mod.make_split(protocol)
-    equation = json.loads(config.equation_path(protocol).read_text())
-    fn = physics.compile_tree(equation["tree"])
+    fn, _ = physics.physics_fn_from_equation(protocol)
     with torch.no_grad():
         pred_scaled = fn(torch.from_numpy(split.x_test)).cpu().numpy()
     pred_raw = split.unscale_y(pred_scaled)

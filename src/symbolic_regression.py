@@ -1,9 +1,10 @@
 """Protocol-specific, train-only symbolic-regression discovery.
 
 The critical invariant is that PySR never receives validation/test rows or
-their targets. ``data.make_split(protocol)`` fits all scalers on train only;
-this module consumes those already-scaled training arrays directly, so the
-symbolic expression and the neural model live in the exact same coordinates.
+their targets. ``data.make_split(protocol)`` fits all scalers on train only.
+For the urgent high-load experiment, PySR receives train-only standardized
+thermodynamic proxy features whose scaler provenance is stored with the
+equation and reconstructed during neural training.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import config, data as data_mod
+from . import config, data as data_mod, physics_features
 
 
 def _subsample(protocol: str, split_seed: int = config.SEED):
@@ -29,7 +30,14 @@ def _subsample(protocol: str, split_seed: int = config.SEED):
         size=min(config.SR_SUBSAMPLE, len(split.x_train)),
         replace=False,
     )
-    return split, split.x_train[idx].astype(np.float64), split.y_train[idx].astype(np.float64)
+    if protocol == "high_load":
+        from sklearn.preprocessing import StandardScaler
+
+        physics_train_raw = physics_features.numpy_features(split.x_train_raw)
+        physics_scaler = StandardScaler().fit(physics_train_raw)
+        X = physics_scaler.transform(physics_train_raw[idx]).astype(np.float64)
+        return split, X, split.y_train[idx].astype(np.float64), physics_scaler
+    return split, split.x_train[idx].astype(np.float64), split.y_train[idx].astype(np.float64), None
 
 
 def _fit_pysr_in_process(X, y, protocol: str):
@@ -101,8 +109,8 @@ def _fit_gplearn(X, y):
 
     regressor = SymbolicRegressor(
         function_set=("add", "sub", "mul", "div"),
-        population_size=2000,
-        generations=config.SR_NITERATIONS,
+        population_size=500,
+        generations=min(5, config.SR_NITERATIONS),
         p_crossover=0.7,
         p_subtree_mutation=0.1,
         parsimony_coefficient=0.001,
@@ -206,7 +214,7 @@ def discover(protocol: str, force: bool = False) -> dict:
             print(f"Reusing existing {path} (pass --force to rediscover)")
             return equation
 
-    split, X, y = _subsample(protocol)
+    split, X, y, physics_scaler = _subsample(protocol)
     source, expression, loss = None, None, None
     try:
         expression, loss = _fit_pysr(X, y, protocol)
@@ -220,6 +228,12 @@ def discover(protocol: str, force: bool = False) -> dict:
         source = "gplearn"
 
     audit = data_mod.split_audit(protocol)
+    if physics_scaler is not None:
+        X_val_symbolic = physics_scaler.transform(
+            physics_features.numpy_features(split.x_val_raw)
+        ).astype(np.float64)
+    else:
+        X_val_symbolic = split.x_val.astype(np.float64)
     equation = {
         "protocol_version": config.PROTOCOL_VERSION,
         "protocol": protocol,
@@ -227,6 +241,8 @@ def discover(protocol: str, force: bool = False) -> dict:
         "expression": str(expression),
         "tree": tree,
         "loss": loss,
+        "input_space": "physics_features" if physics_scaler is not None else "standardized_raw_features",
+        "input_feature_names": list(physics_features.NAMES) if physics_scaler is not None else list(config.FEATURE_COLUMNS),
         "n_discovery_rows": int(len(X)),
         "seed": config.SEED,
         "search_config": {
@@ -241,13 +257,22 @@ def discover(protocol: str, force: bool = False) -> dict:
             "subprocess_timeout_in_seconds": config.SR_SUBPROCESS_TIMEOUT_SECONDS,
         },
         "train_discovery_r2": _r2(tree, X, y),
-        "validation_r2": _r2(tree, split.x_val, split.y_val),
+        "validation_r2": _r2(tree, X_val_symbolic, split.y_val),
         "train_index_sha256": audit["train_index_sha256"],
         "feature_scaler_mean": audit["feature_scaler_mean"],
         "feature_scaler_scale": audit["feature_scaler_scale"],
         "target_scaler_mean": audit["target_scaler_mean"],
         "target_scaler_scale": audit["target_scaler_scale"],
     }
+    if physics_scaler is not None:
+        equation.update(
+            {
+                "raw_feature_scaler_mean": audit["feature_scaler_mean"],
+                "raw_feature_scaler_scale": audit["feature_scaler_scale"],
+                "physics_feature_scaler_mean": physics_scaler.mean_.tolist(),
+                "physics_feature_scaler_scale": physics_scaler.scale_.tolist(),
+            }
+        )
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(equation, indent=2) + "\n")
     assert np.isclose(_r2(tree, X, y), equation["train_discovery_r2"])

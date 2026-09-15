@@ -12,7 +12,7 @@ FIGURES_DIR = RESULTS_DIR / "figures"
 STATE_PATH = RESULTS_DIR / "state.json"
 
 # Increment whenever an evaluation, training, or search-semantic change should invalidate cached stages.
-PROTOCOL_VERSION = "clean-v4-modal-bounded-pysr-20260915"
+PROTOCOL_VERSION = "clean-v5-physics-feature-pysr-highload-20260915"
 
 TARGET_COLUMN = "Motor KW"
 FEATURE_COLUMNS = [
@@ -45,19 +45,19 @@ HIGH_LOAD_VALIDATION_QUANTILE = 0.90
 
 # Physics-weight selection is validation-only. Test metrics are produced only
 # after this sweep has selected a frozen lambda.
-LAMBDA_CANDIDATES = (0.00, 0.02, 0.05, 0.10, 0.20, 0.50, 1.00)
+LAMBDA_CANDIDATES = (0.00, 0.02, 0.05, 0.10, 0.20)
 TUNING_SEEDS = (42, 43, 44)
 FINAL_SEEDS = (42, 43, 44, 45, 46)
 
 # Symbolic regression is fit only on the main training split for each protocol.
 SR_SUBSAMPLE = 5000
-SR_NITERATIONS = 20
-SR_POPULATIONS = 8
-SR_CYCLES_PER_ITERATION = 200
+SR_NITERATIONS = 10
+SR_POPULATIONS = 4
+SR_CYCLES_PER_ITERATION = 150
 SR_BATCH_SIZE = 512
 SR_MAXSIZE = 20
-SR_TIMEOUT_SECONDS = 900
-SR_SUBPROCESS_TIMEOUT_SECONDS = 420
+SR_TIMEOUT_SECONDS = 180
+SR_SUBPROCESS_TIMEOUT_SECONDS = 240
 
 # Hierarchical bootstrap of paired absolute-error differences across seeds and
 # rows, used for the final test-set improvement confidence interval.

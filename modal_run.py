@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent
 APP_NAME = "pinn-chiller-clean"
 VOLUME_NAME = "pinn-chiller-results"
 REMOTE_REPO = "/root/pinn-dev"
-REMOTE_OUTPUT = "/outputs/latest"
+REMOTE_OUTPUT = "/outputs/fast_phys_latest"
 
 app = modal.App(APP_NAME)
 volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
@@ -51,10 +51,10 @@ image = (
 
 @app.function(
     image=image,
-    gpu=["L4", "A10G", "T4"],
+    gpu=["L40S", "L4", "A10G"],
     cpu=8.0,
     memory=16384,
-    timeout=6900,
+    timeout=3300,
     volumes={"/outputs": volume},
 )
 def run_experiment() -> str:
@@ -76,7 +76,7 @@ def run_experiment() -> str:
     if torch.cuda.is_available():
         print("gpu:", torch.cuda.get_device_name(0), flush=True)
     print("cpu_count:", os.cpu_count(), flush=True)
-    print("protocol: clean-v4-modal-bounded-pysr-20260915", flush=True)
+    print("protocol: clean-v5-physics-feature-pysr-highload-20260915", flush=True)
 
     started = time.time()
     subprocess.run([sys.executable, "-m", "compileall", "-q", "src", "scripts"], check=True)
@@ -84,12 +84,12 @@ def run_experiment() -> str:
         [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
         check=True,
     )
-    subprocess.run([sys.executable, "-m", "src.run_all", "--force"], check=True)
+    subprocess.run([sys.executable, "-m", "src.run_fast_high_load"], check=True)
 
     # Persist the expensive experiment outputs *before* any optional packaging.
     # This ensures a packaging/upload bug can never discard a successful run.
     shutil.copytree("results", f"{REMOTE_OUTPUT}/results", dirs_exist_ok=True)
-    summary = json.loads(Path("results/final_summary.json").read_text())
+    summary = json.loads(Path("results/fast_high_load_summary.json").read_text())
     run_metadata = {
         "elapsed_seconds": time.time() - started,
         "torch_version": torch.__version__,
@@ -101,17 +101,13 @@ def run_experiment() -> str:
     Path(f"{REMOTE_OUTPUT}/modal_run.json").write_text(json.dumps(run_metadata, indent=2) + "\n")
     volume.commit()
 
-    # Package only after the results are safely committed. Invoke as a module so
-    # the repository root remains on sys.path and `from src...` imports resolve.
+    # Package the fast-run results directly; the Kaggle packager intentionally
+    # expects the full random+high-load pipeline and is not applicable here.
     try:
-        subprocess.run(
-            [sys.executable, "-m", "scripts.publish_kaggle_artifacts", "--no-upload"],
-            check=True,
-        )
-        shutil.copy2(
-            "artifacts/kaggle/pinn_artifacts.tar.gz",
-            f"{REMOTE_OUTPUT}/pinn_artifacts.tar.gz",
-        )
+        import tarfile
+        archive_path = f"{REMOTE_OUTPUT}/fast_physics_results.tar.gz"
+        with tarfile.open(archive_path, "w:gz", compresslevel=1) as archive:
+            archive.add("results", arcname="results")
         run_metadata["artifact_packaging"] = "complete"
     except Exception as error:
         print(f"WARNING: artifact packaging failed after results were safely committed: {error}", flush=True)

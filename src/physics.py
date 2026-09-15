@@ -15,6 +15,7 @@ from typing import Callable
 import torch
 
 from . import config
+from . import physics_features
 
 def _c(value: float) -> dict:
     return {"op": "const", "v": value}
@@ -88,7 +89,26 @@ def load_equation(protocol: str) -> dict:
 def physics_fn_from_equation(protocol: str) -> tuple[Callable[[torch.Tensor], torch.Tensor], str]:
     """Return (compiled physics function, human-readable expression)."""
     equation = load_equation(protocol)
-    return compile_tree(equation["tree"]), equation["expression"]
+    base = compile_tree(equation["tree"])
+    if equation.get("input_space") != "physics_features":
+        return base, equation["expression"]
+
+    x_mean = torch.tensor(equation["raw_feature_scaler_mean"], dtype=torch.float32)
+    x_scale = torch.tensor(equation["raw_feature_scaler_scale"], dtype=torch.float32)
+    p_mean = torch.tensor(equation["physics_feature_scaler_mean"], dtype=torch.float32)
+    p_scale = torch.tensor(equation["physics_feature_scaler_scale"], dtype=torch.float32)
+
+    def fn(x_scaled: torch.Tensor) -> torch.Tensor:
+        xm = x_mean.to(device=x_scaled.device, dtype=x_scaled.dtype)
+        xs = x_scale.to(device=x_scaled.device, dtype=x_scaled.dtype)
+        pm = p_mean.to(device=x_scaled.device, dtype=x_scaled.dtype)
+        ps = p_scale.to(device=x_scaled.device, dtype=x_scaled.dtype)
+        x_raw = x_scaled * xs + xm
+        p_raw = physics_features.torch_features(x_raw)
+        p_scaled = (p_raw - pm) / ps
+        return base(p_scaled)
+
+    return fn, equation["expression"]
 
 
 def legacy_physics_fn() -> Callable[[torch.Tensor], torch.Tensor]:
