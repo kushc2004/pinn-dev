@@ -9,7 +9,6 @@ structure.
 from __future__ import annotations
 
 import numpy as np
-import torch
 
 
 NAMES = (
@@ -33,7 +32,9 @@ def numpy_features(x_raw: np.ndarray) -> np.ndarray:
     return np.column_stack((evap_dt, evap_q, cond_dt, cond_q, water_lift, pressure))
 
 
-def torch_features(x_raw: torch.Tensor) -> torch.Tensor:
+def torch_features(x_raw):
+    import torch
+
     evap_dt = x_raw[:, 0] - x_raw[:, 1]
     evap_q = x_raw[:, 2] * evap_dt
     cond_dt = x_raw[:, 5] - x_raw[:, 4]
